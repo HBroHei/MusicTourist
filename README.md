@@ -6,6 +6,11 @@ This app currently functions, but it is not well-tested. Bugs will occasionally 
 and features are incomplete. \
 The apk will be released once it is considered stable enough.
 
+For people who wish to try out the app now, please clone this repo into Android Studio, and build the app.
+
+## Video Showcase
+https://youtu.be/mN2VdoCReJs
+
 ## How to use
 ### Add a song
 1. Press the "+" button in the main screen to choose the music file you want to replace with.
