@@ -2,6 +2,7 @@ package com.hbrohei.musictour;
 
 import android.content.Context;
 import android.content.DialogInterface;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -49,34 +50,32 @@ public class MusicListView extends RecyclerView.Adapter<MusicListView.ViewHolder
                 menu.setOnMenuItemClickListener(new PopupMenu.OnMenuItemClickListener() {
                     @Override
                     public boolean onMenuItemClick(MenuItem item) {
+                        //get name
+                        int idxRemoved = -1;
+                        String[] currentMusicFilesList = new File(view.getContext().getExternalFilesDir(null) + "/Custom Music").list((dir, name) -> name.toLowerCase(Locale.ROOT).contains(".mp3"));
+                        ArrayList<String> newMusicFileList = new ArrayList<>();
+                        for(int i=0;i<musicFileList.length;i++){
+                            //Check if the item description is the same
+                            if(!musicFileList[i].equals(itemName.getText().toString())){
+                                newMusicFileList.add(musicFileList[i]);
+                            }
+                            else{
+                                //Mark down the index
+                                idxRemoved = i;
+                            }
+                        }
+
+                        final String textname = currentMusicFilesList[idxRemoved];
+                        //Delete List Item
                         if(item.getItemId()==R.id.del){
                             AlertDialog.Builder delDialog = new AlertDialog.Builder(view.getContext());
                             delDialog.setTitle("Delete this item?");
                             delDialog.setMessage("This cannot be undo.");
                             delDialog.setNegativeButton("Cancel",null);
+                            int finalIdxRemoved = idxRemoved;
                             delDialog.setPositiveButton("OK", new DialogInterface.OnClickListener() {
                                 @Override
-                                public void onClick(DialogInterface dialog, int which) { //TODO make it work
-                                    //final String textname = itemName.getText().toString();
-
-                                    //Log.d("DELETE_FILE",textname);
-
-                                    int idxRemoved = -1;
-                                    String[] currentMusicFilesList = new File(view.getContext().getExternalFilesDir(null) + "/Custom Music").list((dir, name) -> name.toLowerCase(Locale.ROOT).contains(".mp3"));
-                                    ArrayList<String> newMusicFileList = new ArrayList<>();
-                                    for(int i=0;i<musicFileList.length;i++){
-                                        //Check if the item description is the same
-                                        if(!musicFileList[i].equals(itemName.getText().toString())){
-                                            newMusicFileList.add(musicFileList[i]);
-                                        }
-                                        else{
-                                            //Mark down the index
-                                            idxRemoved = i;
-                                        }
-                                    }
-
-                                    final String textname = currentMusicFilesList[idxRemoved];
-
+                                public void onClick(DialogInterface dialog, int which) {
                                     SharedPreferences.Editor loopTimeSP = view.getContext().getSharedPreferences("MTour_duration",Context.MODE_PRIVATE).edit();
                                     loopTimeSP.remove(textname);
                                     loopTimeSP.apply();
@@ -87,18 +86,25 @@ public class MusicListView extends RecyclerView.Adapter<MusicListView.ViewHolder
 
                                     musicFileList = newMusicFileList.toArray(new String[0]);
 
-                                    if(idxRemoved!=-1){
+                                    if(finalIdxRemoved !=-1){
                                         //String[] currentMusicFilesList = new File(view.getContext().getExternalFilesDir(null) + "/Custom Music").list((dir, name) -> name.toLowerCase(Locale.ROOT).contains(".mp3"));
-                                        if(!new File(view.getContext().getExternalFilesDir(null) + "/Custom Music/" + currentMusicFilesList[idxRemoved]).delete()){
+                                        if(!new File(view.getContext().getExternalFilesDir(null) + "/Custom Music/" + currentMusicFilesList[finalIdxRemoved]).delete()){
                                             Toast.makeText(view.getContext(), "Error: Cannot delete file", Toast.LENGTH_SHORT).show();
                                             return;
                                         }
-                                        notifyItemRemoved(idxRemoved);
+                                        notifyItemRemoved(finalIdxRemoved);
                                     }
                                     Toast.makeText(view.getContext(), "Removed", Toast.LENGTH_SHORT).show();
                                 }
                             });
                             delDialog.show();
+                        }
+                        else if(item.getItemId()==R.id.edit){
+                            Intent editIntent = new Intent("editDia");
+                            editIntent.putExtra("sname",textname);
+                            view.getContext().sendBroadcast(editIntent);
+
+                            Log.d("TEXTNAME",textname);
                         }
                         return false;
                     }

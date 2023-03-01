@@ -48,6 +48,8 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.Arrays;
 import java.util.Locale;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class MainListActivity extends AppCompatActivity {
 
@@ -91,6 +93,7 @@ public class MainListActivity extends AppCompatActivity {
     private boolean isRunning = false;
     private ActivityResultLauncher<String> recAudioRequest;
     private BroadcastReceiver stopRec_BC;
+    private BroadcastReceiver editDia;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -122,35 +125,35 @@ public class MainListActivity extends AppCompatActivity {
             @Override
             public void onClick(View view) {
                 Log.d("RUNNING", String.valueOf(isRunning));
-                    if(nicknameET.getText().toString().equals("")){
-                        Toast.makeText(MainListActivity.this, "Please enter your in-game username.", Toast.LENGTH_SHORT).show();
-                        return;
-                    }
-                    if(musicFilesList.length==0){
-                        Toast.makeText(MainListActivity.this, "Please add custom music first", Toast.LENGTH_SHORT).show();
-                        return;
-                    }
-                    SharedPreferences.Editor nameSPE = nnameSP.edit();
-                    nameSPE.putString("name",nicknameET.getText().toString());
-                    nameSPE.apply();
-                    scrCap.prepare();
-                    Toast.makeText(MainListActivity.this, "Please accept the permission for it to function", Toast.LENGTH_SHORT).show();
-                    if (ContextCompat.checkSelfPermission(getApplicationContext(), Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-                        //Prepare recording foreground
-                        scrCap.recordPrepare();
-                        scrCap.requestPermission(getApplicationContext(),capScreenRequest);
-                        isRunning = true;
+                if(nicknameET.getText().toString().equals("")){
+                    Toast.makeText(MainListActivity.this, "Please enter your in-game username.", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                if(musicFilesList.length==0){
+                    Toast.makeText(MainListActivity.this, "Please add custom music first", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                SharedPreferences.Editor nameSPE = nnameSP.edit();
+                nameSPE.putString("name",nicknameET.getText().toString());
+                nameSPE.apply();
+                scrCap.prepare();
+                Toast.makeText(MainListActivity.this, "Please accept the permission for it to function", Toast.LENGTH_SHORT).show();
+                if (ContextCompat.checkSelfPermission(getApplicationContext(), Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                    //Prepare recording foreground
+                    scrCap.recordPrepare();
+                    scrCap.requestPermission(getApplicationContext(),capScreenRequest);
+                    isRunning = true;
 
 
-                    } else if (shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)) {
-                        //Tell the user the permission
-                    } else {
-                        // You can directly ask for the permission.
-                        // The registered ActivityResultCallback gets the result of this request.
-                        recAudioRequest.launch(Manifest.permission.RECORD_AUDIO);
-                    }
-                    //requestPermissions( permissions, 200);
-                    //scrCap.requestPermission(MainActivity.this)
+                } else if (shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)) {
+                    //Tell the user the permission
+                } else {
+                    // You can directly ask for the permission.
+                    // The registered ActivityResultCallback gets the result of this request.
+                    recAudioRequest.launch(Manifest.permission.RECORD_AUDIO);
+                }
+                //requestPermissions( permissions, 200);
+                //scrCap.requestPermission(MainActivity.this)
             }
         });/**/
         /*
@@ -217,18 +220,7 @@ public class MainListActivity extends AppCompatActivity {
         setActivityResultLauncher();
 
         //Add broadcastreceiver,thanks openai
-        stopRec_BC = new BroadcastReceiver(){
-            @Override
-            public void onReceive(Context context, Intent intent) {
-                scrCap.stop();
-
-                Intent stopService = new Intent(getApplicationContext(),ScrCapForeground.class);
-                stopService.putExtra("flag",1);
-                startService(stopService);
-                finishAndRemoveTask();
-            }
-        };
-        registerReceiver(stopRec_BC,new IntentFilter("stopRec"));
+        addBroadcastreceiver();
 
         //Set dialog view
         createDialogView();
@@ -292,6 +284,37 @@ public class MainListActivity extends AppCompatActivity {
                         Toast.makeText(this, "Please accept the permission", Toast.LENGTH_SHORT).show();
                     }
                 });
+    }
+
+    private void addBroadcastreceiver(){
+        stopRec_BC = new BroadcastReceiver(){
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                scrCap.stop();
+
+                Intent stopService = new Intent(getApplicationContext(),ScrCapForeground.class);
+                stopService.putExtra("flag",1);
+                startService(stopService);
+                finishAndRemoveTask();
+            }
+        };
+        registerReceiver(stopRec_BC,new IntentFilter("stopRec"));
+
+        editDia = new BroadcastReceiver(){
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                try {
+                    showSongDialog(
+                            intent.getStringExtra("sname"),
+                            Uri.fromFile(new File(getExternalFilesDir(null) + "/Custom Music/" + intent.getStringExtra("sname")))
+                    );
+                } catch (IOException ioe) {
+                    Toast.makeText(MainListActivity.this, "Error while opening the file!\n" + ioe.getCause() + ioe.getMessage(), Toast.LENGTH_SHORT).show();
+                    Log.e("TEXTNAME", Arrays.toString(ioe.getStackTrace()));
+                }
+            }
+        };
+        registerReceiver(editDia,new IntentFilter("editDia"));
     }
 
     private void openFile() {
@@ -411,10 +434,12 @@ public class MainListActivity extends AppCompatActivity {
             if(!isPlaying){
                 previewMP.start();
                 btn_play_dialog.setImageResource(android.R.drawable.ic_media_pause);
+                dia_seekbar.setEnabled(false);
             }
             else{
                 previewMP.pause();
                 btn_play_dialog.setImageResource(android.R.drawable.ic_media_play);
+                dia_seekbar.setEnabled(true);
             }
             isPlaying = !isPlaying;
         });
@@ -486,36 +511,61 @@ public class MainListActivity extends AppCompatActivity {
                     dia_seekbar.setProgress(previewMP.getCurrentPosition());
                 }
                 seekbarUpdateDia.postDelayed(this, 1000);
-                /*
-                try {
-                    Log.d("ADD_MUSIC", "looping" + timeToMil(
-                            Integer.parseInt(loopTime_min.getText().toString()),
-                            Integer.parseInt(loopTime_sec.getText().toString()),
-                            Integer.parseInt(loopTime_mse.getText().toString())
-                    ) + " " + previewMP.getCurrentPosition());
-                }
-                catch (NumberFormatException ignored){}*/
             }
         });
 
         AlertDialog.Builder songDialog = new AlertDialog.Builder(MainListActivity.this);
-        if(Arrays.asList(musicFilesList).contains(songName)){
+        Log.d("TEXTNAME", Arrays.toString(musicFilesList) + "," + songName);
+        String[] listFileName = new File(getExternalFilesDir(null) + "/Custom Music").list((dir, name) -> name.toLowerCase(Locale.ROOT).contains(".mp3"));
+        if(listFileName==null){}
+        //If the dialog is called from the "edit" option in menu
+        else if(Arrays.asList(listFileName).contains(songName)){
             songDialog.setTitle("Edit " + songName);
+
+            //Get laps count via regex
+            //GBA Riverside Park\(\d_\d\)\.mp3
+            //Pattern p = ;
+            Matcher m = Pattern.compile("\\(\\d_\\d\\)").matcher(songName);
+            if(m.find()){
+                //This is kinda hacky but it should works
+                currentLapET.setText(String.valueOf(songName.charAt(songName.indexOf("(")+1)));
+                maxLapET.setText(String.valueOf(songName.charAt(songName.indexOf(")")-1)));
+            }
+            else{
+                isBattleBox.setChecked(true);
+            }
+
+            courseNameET.setText(songName.replaceAll(".mp3",""));
+
+            //Get loops time
+            SharedPreferences timeSP = getSharedPreferences("MTour_duration", Context.MODE_PRIVATE);
+            String[] croppedTime = timeSP.getString(songName,"0,10000").split(",");
+            int[] croppedTimeInt = {Integer.parseInt(croppedTime[0]), Integer.parseInt(croppedTime[1])};
+            int[] loopTime_start = ScreenCap.returnMSM(croppedTimeInt[0]);
+            int[] loopTime_end = ScreenCap.returnMSM(croppedTimeInt[1]);
+            loopTime_min2.setText(String.valueOf(loopTime_end[0]));
+            loopTime_sec2.setText(String.valueOf(loopTime_end[1]));
+            loopTime_mse2.setText(String.valueOf(loopTime_end[2]));
+            loopTime_min.setText(String.valueOf(loopTime_start[0]));
+            loopTime_sec.setText(String.valueOf(loopTime_start[1]));
+            loopTime_mse.setText(String.valueOf(loopTime_start[2]));
         }
         else{
             songDialog.setTitle("Add custom music");
+            loopTime_min2.setText(String.valueOf(min));
+            loopTime_sec2.setText(String.valueOf(sec));
+            loopTime_mse2.setText(String.valueOf(milsec));
+            loopTime_min.setText(String.valueOf(0));
+            loopTime_sec.setText(String.valueOf(0));
+            loopTime_mse.setText(String.valueOf(0));
         }
-        loopTime_min2.setText(String.valueOf(min));
-        loopTime_sec2.setText(String.valueOf(sec));
-        loopTime_mse2.setText(String.valueOf(milsec));
-        loopTime_min.setText(String.valueOf(0));
-        loopTime_sec.setText(String.valueOf(0));
-        loopTime_mse.setText(String.valueOf(0));
         dia_seekbar.setMax(previewMP.getDuration());
         songDialog.setView(base);
+        //Cancel Action
         songDialog.setNegativeButton("Cancel", (dialog, which)-> {
             ((ViewGroup) base.getParent()).removeView(base);
         });
+        // Add the song
         songDialog.setPositiveButton("OK", (dialog, which) -> {
             seekbarUpdateDia.removeCallbacksAndMessages(null);
             ((ViewGroup)base.getParent()).removeView(base);
@@ -550,7 +600,7 @@ public class MainListActivity extends AppCompatActivity {
             songNameSP.putString(newFileName,songName);
             songNameSP.apply();
 
-            try { //TODO Find an android-compatible method
+            try {
                 copyMusicFile(songPath,getExternalFilesDir(null) + "/Custom Music/" + newFileName);
                 Log.d("ADD_MUSIC", String.valueOf(new File(getExternalFilesDir(null) + "/Custom Music").list((dir, name) -> name.toLowerCase(Locale.ROOT).contains(".mp3"))));
             } catch (Exception ioe) {
@@ -560,8 +610,6 @@ public class MainListActivity extends AppCompatActivity {
             }
 
             updateRecycleView();
-
-            //Log.d("ADD_MUSIC",songName);
         });
         songDialog.setCancelable(false);
         songDialog.show();

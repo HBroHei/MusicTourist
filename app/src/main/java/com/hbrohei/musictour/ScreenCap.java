@@ -121,6 +121,8 @@ public class ScreenCap {
     public void recordPrepare(){
         //https://stackoverflow.com/questions/14336338/screen-video-record-of-current-activity-android?answertab=trending#tab-top
         mRecorder = new MediaRecorder();
+        //mRecorder.release();
+        //mRecorder.reset();
         //Set the required attributes of mRecorder
         mRecorder.setVideoSource(MediaRecorder.VideoSource.SURFACE);
         mRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
@@ -128,11 +130,15 @@ public class ScreenCap {
         mRecorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
         mRecorder.setVideoEncoder(MediaRecorder.VideoEncoder.H264);
         mRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.DEFAULT);
-        mRecorder.setVideoEncodingBitRate(512*1000);
-        mRecorder.setVideoFrameRate(24);
+        mRecorder.setVideoEncodingBitRate(10*1000000);
+        mRecorder.setVideoFrameRate(30);
+        //Temporary fix for H264 as H264 require width and height divisible by 16
+        //https://stackoverflow.com/a/57943426
+        if(dwidth%16!=0){dwidth -= dwidth%16;}
+        if(dheight%16!=0){dheight -= dheight%16;}
         mRecorder.setVideoSize(dwidth,dheight);
-        Log.d("SAVE_PATH",appContext.getExternalCacheDir() + "/temp.mp4");
-        mRecorder.setOutputFile(appContext.getExternalCacheDir() + "/temp.mp4");
+        Log.d("SAVE_PATH",appContext.getExternalFilesDir(null) + "/temp.mp4");
+        mRecorder.setOutputFile(appContext.getExternalFilesDir(null) + "/temp.mp4");
 
         //Prepare / check if recorder is ready
         try {
@@ -148,28 +154,28 @@ public class ScreenCap {
 
     @RequiresApi(api = Build.VERSION_CODES.Q)
     private void recordInternalSound(Context ctx){
-            AudioPlaybackCaptureConfiguration config =
-                    new AudioPlaybackCaptureConfiguration.Builder(mProjection)
-                            .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
-                            .build();
-            if (ActivityCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-                // TODO: Consider calling
-                //    ActivityCompat#requestPermissions
-                // here to request the missing permissions, and then overriding
-                //   public void onRequestPermissionsResult(int requestCode, String[] permissions,
-                //                                          int[] grantResults)
-                // to handle the case where the user grants the permission. See the documentation
-                // for ActivityCompat#requestPermissions for more details.
-                return;
-            }
-            AudioRecord record = new AudioRecord.Builder()
-                    .setAudioFormat(new AudioFormat.Builder()
-                            .setEncoding(AudioFormat.ENCODING_MP3)
-                            .setSampleRate(8000)
-                            .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
-                            .build())
-                    .setAudioPlaybackCaptureConfig(config)
-                    .build();
+        AudioPlaybackCaptureConfiguration config =
+                new AudioPlaybackCaptureConfiguration.Builder(mProjection)
+                        .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
+                        .build();
+        if (ActivityCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            // TODO: Consider calling
+            //    ActivityCompat#requestPermissions
+            // here to request the missing permissions, and then overriding
+            //   public void onRequestPermissionsResult(int requestCode, String[] permissions,
+            //                                          int[] grantResults)
+            // to handle the case where the user grants the permission. See the documentation
+            // for ActivityCompat#requestPermissions for more details.
+            return;
+        }
+        AudioRecord record = new AudioRecord.Builder()
+                .setAudioFormat(new AudioFormat.Builder()
+                        .setEncoding(AudioFormat.ENCODING_MP3)
+                        .setSampleRate(8000)
+                        .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
+                        .build())
+                .setAudioPlaybackCaptureConfig(config)
+                .build();
     }
 
 
@@ -186,18 +192,10 @@ public class ScreenCap {
 
         //Build the notification
         Notification.Builder nBuilder = new Notification.Builder(ctx,"scrCapTest");
-        /*Intent notiClickAction = new Intent(ctx, EndServiceActivity.class);
-
-        final Intent notiClickAction = new Intent(ctx, MainActivity.class);
-        notiClickAction.setAction(Intent.ACTION_MAIN);
-        notiClickAction.addCategory(Intent.CATEGORY_LAUNCHER);
-        notiClickAction.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        notiClickAction.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);/**/
 
         Intent notiClickAction = new Intent("stopRec");
 
         nBuilder.setContentIntent(PendingIntent.getBroadcast(ctx,0,notiClickAction,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE))
-        //nBuilder.setContentIntent(PendingIntent.getActivity(ctx, 0, notiClickAction, PendingIntent.FLAG_IMMUTABLE))
                 .setLargeIcon(BitmapFactory.decodeResource(ctx.getResources(), R.mipmap.ic_launcher))
                 .setSmallIcon(R.mipmap.ic_launcher)
                 .setContentText("Click here to stop")
@@ -318,7 +316,11 @@ public class ScreenCap {
 
             Log.d("LOGGING", String.valueOf(surface.isValid()));
 
-            mRecorder.start();
+            try {
+                mRecorder.start();
+            }catch(Exception e){
+                Log.e("ERROR",e.toString());
+            }
 
             return true;
         }
@@ -364,6 +366,19 @@ public class ScreenCap {
         return dheight;
     }
 
+    /**
+     * Returns the Minutes, Seconds and Milliseconds of a time given (in Milliseconds)
+     * @param time The time in milliseconds
+     * @return the Minutes, Seconds and Milliseconds stored respectively in a int array
+     */
+    public static int[] returnMSM(int time){
+        int[] returnTime = new int[3];
+        returnTime[0] = time/1000/60;
+        returnTime[1] = time/1000 - returnTime[0]*60;
+        returnTime[2] = time - returnTime[0]*60*1000 - returnTime[1]*1000;
+
+        return returnTime;
+    }
 
 }
 
