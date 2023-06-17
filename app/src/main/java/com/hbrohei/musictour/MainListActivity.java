@@ -100,9 +100,7 @@ public class MainListActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_mainlist);
 
-        findViewById(R.id.scrCapToggle).setVisibility(View.GONE);
 
-        scrCapToggle = (ToggleButton) findViewById(R.id.scrCapToggle);
 
         DisplayMetrics dm = new DisplayMetrics();
         getWindowManager().getDefaultDisplay().getMetrics(dm);
