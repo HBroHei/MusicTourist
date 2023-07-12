@@ -19,6 +19,8 @@ import android.media.AudioAttributes;
 import android.media.AudioFormat;
 import android.media.AudioPlaybackCaptureConfiguration;
 import android.media.AudioRecord;
+import android.media.AudioTrack;
+import android.media.MediaMuxer;
 import android.media.MediaRecorder;
 import android.media.projection.MediaProjection;
 import android.media.projection.MediaProjectionManager;
@@ -33,6 +35,9 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.annotation.RequiresApi;
 import androidx.core.app.ActivityCompat;
 
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 
 public class ScreenCap {
@@ -49,6 +54,8 @@ public class ScreenCap {
     private Surface surface;
     private Intent projectionIntent;
     private MediaRecorder mRecorder;
+    private AudioRecord aRec;
+    private Thread recThread;
 
     private boolean willRecord = false;
 
@@ -107,7 +114,7 @@ public class ScreenCap {
     /**
      * Prepares the setup for media projection, without starting the foreground service
      */
-    public void prepareWithoutService(){
+    public void prepareWithoutService() {
         mProjectionManager = (MediaProjectionManager) appContext.getSystemService(Context.MEDIA_PROJECTION_SERVICE);
 
         mProjectionCallback = new MediaProjection.Callback() {
@@ -118,42 +125,19 @@ public class ScreenCap {
         };
     }
 
-    public void recordPrepare(){
+    public void recordPrepare(Context ctx) {
         //https://stackoverflow.com/questions/14336338/screen-video-record-of-current-activity-android?answertab=trending#tab-top
         mRecorder = new MediaRecorder();
+        mRecorder.reset();
         //mRecorder.release();
         //mRecorder.reset();
-        //Set the required attributes of mRecorder
-        mRecorder.setVideoSource(MediaRecorder.VideoSource.SURFACE);
-        mRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
-        //mRecorder.setAudioSource(MediaRecorder.AudioSource.UNPROCESSED);
-        mRecorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
-        mRecorder.setVideoEncoder(MediaRecorder.VideoEncoder.H264);
-        mRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.DEFAULT);
-        mRecorder.setVideoEncodingBitRate(10*1000000);
-        mRecorder.setVideoFrameRate(30);
-        //Temporary fix for H264 as H264 require width and height divisible by 16
-        //https://stackoverflow.com/a/57943426
-        if(dwidth%16!=0){dwidth -= dwidth%16;}
-        if(dheight%16!=0){dheight -= dheight%16;}
-        mRecorder.setVideoSize(dwidth,dheight);
-        Log.d("SAVE_PATH",appContext.getExternalFilesDir(null) + "/temp.mp4");
-        mRecorder.setOutputFile(appContext.getExternalFilesDir(null) + "/temp.mp4");
 
-        //Prepare / check if recorder is ready
-        try {
-            mRecorder.prepare();
-        } catch (IOException e) {
-            e.printStackTrace();
-            Log.e("START","Preparation failed: " + e);
-        }
-
-        willRecord = true;
     }
 
 
     @RequiresApi(api = Build.VERSION_CODES.Q)
     private void recordInternalSound(Context ctx){
+        /*OLD CODES
         AudioPlaybackCaptureConfiguration config =
                 new AudioPlaybackCaptureConfiguration.Builder(mProjection)
                         .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
@@ -175,9 +159,142 @@ public class ScreenCap {
                         .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
                         .build())
                 .setAudioPlaybackCaptureConfig(config)
+                .build();*/
+
+        AudioPlaybackCaptureConfiguration config = new AudioPlaybackCaptureConfiguration.Builder(mProjection)
+                .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
+                .addMatchingUsage(AudioAttributes.USAGE_GAME)
+                .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
                 .build();
+
+        AudioFormat af = new AudioFormat.Builder()
+                .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
+                .setSampleRate(44100)
+                .build();
+        if (ActivityCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            // TODO: Consider calling
+            //    ActivityCompat#requestPermissions
+            // here to request the missing permissions, and then overriding
+            //   public void onRequestPermissionsResult(int requestCode, String[] permissions,
+            //                                          int[] grantResults)
+            // to handle the case where the user grants the permission. See the documentation
+            // for ActivityCompat#requestPermissions for more details.
+            return;
+        }
+        aRec = new AudioRecord.Builder()
+                .setAudioPlaybackCaptureConfig(config)
+                .setAudioFormat(af)
+                .setBufferSizeInBytes(AudioRecord.getMinBufferSize(af.getSampleRate(), AudioFormat.CHANNEL_IN_MONO, af.getEncoding()))
+                .build();
+        aRec.startRecording();
+
+
+        recThread = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try{
+                    FileOutputStream outFile = new FileOutputStream(appContext.getExternalFilesDir(null) + "/temp2.wav");
+                    byte[] rawData = new byte[8];
+
+                    // read from the AudioRecord
+                    while(!recThread.isInterrupted()) {
+                        aRec.read(rawData, 0, 8);
+                        outFile.write(rawData,0, rawData.length);
+                    }
+
+                    outFile.flush();
+                    outFile.close();
+                    addWavHeader(appContext.getExternalFilesDir(null) + "/temp2.wav");
+                }
+                catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+        });
+        recThread.start();
+        //DISABLED due to not supported by native MediaRecorder
+        //mRecorder.setAudioSource(MediaRecorder.AudioSource.UNPROCESSED);
+        //mRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.DEFAULT);
+
     }
 
+    //Long code incoming
+    /**
+     * Add the wave header to a file
+     * @param filePath the wave file path to be outputted
+     * @throws IOException Error occured
+     */
+    private void addWavHeader(String filePath) throws IOException {
+        FileInputStream fis = new FileInputStream(filePath);
+        byte[] audioData = new byte[fis.available()];
+        fis.read(audioData);
+        fis.close();
+
+        long audioDataSize = 0; //audioData.length;
+        //long totalFileSize = audioDataSize + 36;
+        long totalFileSize = 0;
+
+        // Write the header information to a byte array
+        // https://stackoverflow.com/questions/5245497/how-to-record-wav-format-file-in-android
+        byte[] header = new byte[44];
+        // RIFF header
+        header[0] = 'R'; header[1] = 'I'; header[2] = 'F'; header[3] = 'F';
+        // Total file size - 8 bytes
+        header[4] = (byte) (totalFileSize & 0xff);
+        header[5] = (byte) ((totalFileSize >> 8) & 0xff);
+        header[6] = (byte) ((totalFileSize >> 16) & 0xff);
+        header[7] = (byte) ((totalFileSize >> 24) & 0xff);
+        header[8] = 'W'; // Wave file format
+        header[9] = 'A';
+        header[10] = 'V';
+        header[11] = 'E';
+        header[12] = 'f'; // "fmt " chunk
+        header[13] = 'm';
+        header[14] = 't';
+        header[15] = ' ';
+        header[16] = 16; // Subchunk1 size (16 bytes)
+        header[17] = 0;
+        header[18] = 0;
+        header[19] = 0;
+        header[20] = 1; // Audio format (PCM)
+        header[21] = 0;
+        header[22] = (byte) 1; // Number of channels
+        header[23] = 0;
+        int sampleRate = 44100;
+        int numChannels = 1;
+        int bitsPerSample = 16;
+        header[24] = (byte) (44100 & 0xff); // Sample rate
+        header[25] = (byte) ((sampleRate >> 8) & 0xff);
+        header[26] = (byte) ((sampleRate >> 16) & 0xff);
+        header[27] = (byte) ((sampleRate >> 24) & 0xff);
+
+        long byteRate = ((sampleRate * numChannels * 8) / 8);
+        header[28] = (byte) byteRate; // Byte rate
+        header[29] = (byte) (byteRate >>> 8 & 0xFF);
+        header[30] = (byte) (byteRate >>> 16 & 0xFF);
+        header[31] = (byte) (byteRate >>> 24 & 0xFF);
+        header[32] = (byte) (numChannels * bitsPerSample / 8); // Block align
+        header[33] = 0;
+
+        header[34] = (byte) bitsPerSample; // Bits per sample
+        header[35] = 0;
+        header[36] = 'd'; // "data" chunk
+        header[37] = 'a';
+        header[38] = 't';
+        header[39] = 'a';
+        header[40] = (byte) (audioDataSize & 0xff); // Data size
+        header[41] = (byte) ((audioDataSize >> 8) & 0xff);
+        header[42] = (byte) ((audioDataSize >> 16) & 0xff);
+        header[43] = (byte) ((audioDataSize >> 24) & 0xff);
+
+        // Write the header to the beginning of the file
+        FileOutputStream fos = new FileOutputStream(filePath);
+        fos.write(header);
+        fos.write(audioData);
+        fos.close();
+
+}
 
     /**
      * Create a notification for foreground service. Use this in "onStartCommand"
@@ -301,14 +418,63 @@ public class ScreenCap {
      */
     public boolean start(Context ctx, int requestCode, int resultCode, Intent data){
         if (resultCode == RESULT_OK) {
+            mRecorder.reset();
+
+            mProjection = mProjectionManager.getMediaProjection(resultCode, data);
+            mProjection.registerCallback(mProjectionCallback, null);
+
+            //Set the required attributes of mRecorder
+            /*
+                PaLM: The following is the correct order in which the methods should be called:
+                    setVideoSource()
+                    setAudioSource()
+                    setOutputFormat()
+                    setAudioEncoder()
+                    setVideoEncoder()
+                    setVideoEncodingBitRate()
+                    setVideoFrameRate()
+             */
+            mRecorder.setVideoSource(MediaRecorder.VideoSource.SURFACE);
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                //recordInternalSound(ctx);
+                recordInternalSound(ctx);
+                mRecorder.setAudioSource(MediaRecorder.AudioSource.UNPROCESSED);
+            }
+            else{
+                mRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
+            }
+            mRecorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
+
+            // If statement is here if I intended to switch the Encoder in the future for every methods
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                mRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.DEFAULT);
+            }
+            else{
+                mRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.DEFAULT);
+            }
+            mRecorder.setVideoEncoder(MediaRecorder.VideoEncoder.H264);
+            mRecorder.setVideoEncodingBitRate(10*1000000);
+            mRecorder.setVideoFrameRate(30);
+            //Temporary fix for H264 as H264 require width and height divisible by 16
+            //https://stackoverflow.com/a/57943426
+            if(dwidth%16!=0){dwidth -= dwidth%16;}
+            if(dheight%16!=0){dheight -= dheight%16;}
+            mRecorder.setVideoSize(dwidth,dheight);
+            Log.d("SAVE_PATH",appContext.getExternalFilesDir(null) + "/temp.mp4");
+            mRecorder.setOutputFile(appContext.getExternalFilesDir(null) + "/temp.mp4");
+
+            willRecord = true;
+
+            //Prepare / check if recorder is ready
+            try {
+                mRecorder.prepare();
+            } catch (IOException e) {
+                e.printStackTrace();
+                Log.e("START","Preparation failed: " + e);
             }
 
             projectionIntent = data;
 
-            mProjection = mProjectionManager.getMediaProjection(resultCode, data);
-            mProjection.registerCallback(mProjectionCallback, null);
             if (willRecord) {
                 surface = mRecorder.getSurface();
             }
@@ -337,11 +503,18 @@ public class ScreenCap {
             mRecorder.release();
             //mProjection = null;
             mProjection.stop();
-        }
-        catch(RuntimeException re){
-            Log.e("START", String.valueOf(re));
-        }
 
+            //Stop AudioRecord
+            recThread.interrupt();
+            recThread.join();
+
+            aRec.stop();
+            aRec.release();
+            aRec = null;
+        }
+        catch(RuntimeException | InterruptedException e) {
+            Log.e("START", String.valueOf(e));
+        }
 
 
     }

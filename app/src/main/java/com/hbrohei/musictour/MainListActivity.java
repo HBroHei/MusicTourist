@@ -138,7 +138,7 @@ public class MainListActivity extends AppCompatActivity {
                 Toast.makeText(MainListActivity.this, "Please accept the permission for it to function", Toast.LENGTH_SHORT).show();
                 if (ContextCompat.checkSelfPermission(getApplicationContext(), Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
                     //Prepare recording foreground
-                    scrCap.recordPrepare();
+                    scrCap.recordPrepare(getApplicationContext());
                     scrCap.requestPermission(getApplicationContext(),capScreenRequest);
                     isRunning = true;
 
@@ -269,7 +269,7 @@ public class MainListActivity extends AppCompatActivity {
                 new ActivityResultContracts.RequestPermission(), isGranted -> {
                     if (isGranted) {
                         //Prepare recording foreground
-                        scrCap.recordPrepare();
+                        scrCap.recordPrepare(getApplicationContext());
                         scrCap.requestPermission(getApplicationContext(),capScreenRequest);
                         isRunning = true;
                         saveRunningState();

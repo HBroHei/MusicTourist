@@ -10,7 +10,6 @@
         android:id="@+id/musicRList"
         android:layout_width="409dp"
         android:layout_height="0dp"
-        android:background="#4CAF50"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"

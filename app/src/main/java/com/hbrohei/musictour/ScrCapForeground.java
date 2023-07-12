@@ -2,11 +2,14 @@ package com.hbrohei.musictour;
 
 import android.app.ActivityManager;
 import android.app.Service;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.media.MediaPlayer;
+import android.net.Uri;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
@@ -34,15 +37,18 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.regex.Pattern;
 
 public class ScrCapForeground extends Service {
 
     private ScreenCap scrCap;
 
-    private Handler checkTitleLoop;
+    private Thread checkTitleLoop;
     private Runnable titleLoopRunnable;
 
-    private String lapCount = "";
+    private String lapCount = "1_2";
+    private boolean isFinalLap = false;
+    private boolean finished = false;
     private String[] musicFilesList;
     private String currentCourse;
     private String currentMusicName;
@@ -54,6 +60,7 @@ public class ScrCapForeground extends Service {
     private int startTime;
     private int loopTime;
     private boolean battleMusicTrigger = false;
+    private BroadcastReceiver stopRec_BC;
 
     public ScrCapForeground() {
     }
@@ -98,13 +105,13 @@ public class ScrCapForeground extends Service {
             //Stop Service
             Log.d("PROCESS_APP","Stopping");
             stopForeground(true);
-            checkTitleLoop.removeCallbacksAndMessages(null);
+            //checkTitleLoop.removeCallbacksAndMessages(null);
             stopMusic();
             stopSelf();
         }
         //Run the OCR process
         else if (intent.getIntExtra("flag", -1) == 2) {
-            Log.d("PROCESS_APP","Looping");
+            //Log.d("PROCESS_APP","Looping");
             final int width = intent.getIntExtra("scrCap_width",-1);
             final int height = intent.getIntExtra("scrCap_height",-1);
             final Surface surface = intent.getParcelableExtra("scrCap_surface");
@@ -130,35 +137,42 @@ public class ScrCapForeground extends Service {
             catch(NullPointerException npe){
                 npe.printStackTrace();
             }
-            //Start OCR
-            checkTitleLoop = new Handler();
-            titleLoopRunnable = new Runnable() {
+            checkTitleLoop = new Thread(new Runnable() {
                 @Override
                 public void run() {
-                    Log.d("PROCESS_APP","Looping");
-                    if(surface == null){
-                        checkTitleLoop.postDelayed(this, 500);
-                        Log.w("Surface Empty","Surface is empty!");
-                        return;
-                    }
-                    else if (surface.isValid()) {
-                        Bitmap bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
-                        PixelCopy.request(surface, bmp, i -> {
-                            recognizeText(bmp);
-                        }, new Handler(Looper.getMainLooper()));
-                    }
+                    while (!Thread.currentThread().isInterrupted()) {
+                        Log.d("PROCESS_APP", "Looping");
+                        if (surface == null) {
+                            try {
+                                Thread.sleep(500);
+                                Log.w("Surface Empty", "Surface is empty!");
+                            } catch (InterruptedException e) {
+                                e.printStackTrace();
+                            }
+                            continue;
+                        } else if (surface.isValid()) {
+                            Bitmap bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+                            PixelCopy.request(surface, bmp, i -> {
+                                recognizeText(bmp);
+                            }, new Handler(Looper.getMainLooper()));
+                        }
 
-                    //Custom Loop
-                    if(mPlayer.isPlaying()){
-                        if(mPlayer.getCurrentPosition() >= loopTime){
-                            mPlayer.seekTo(startTime);
-                            Log.d("MUSIC_FILE","Music exceeded " + loopTime + ", looping music...");
+                        //Custom Loop
+                        if (mPlayer.isPlaying()) {
+                            if (mPlayer.getCurrentPosition() >= loopTime) {
+                                mPlayer.seekTo(startTime);
+                                Log.d("MUSIC_FILE", "Music exceeded " + loopTime + ", looping music...");
+                            }
+                        }
+                        try {
+                            Thread.sleep(500);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
                         }
                     }
-                    checkTitleLoop.postDelayed(this, 500);
                 }
-            };
-            checkTitleLoop.postDelayed(titleLoopRunnable,500);
+            });
+            checkTitleLoop.start();
         }
 
         return super.onStartCommand(intent, flags, startId);
@@ -166,7 +180,7 @@ public class ScrCapForeground extends Service {
 
 
     private void recognizeText(Bitmap bmp){
-        Log.d("SCANNED_TEXT","D: Analyzing...");
+        //Log.d("SCANNED_TEXT","D: Analyzing...");
         TextRecognizer tRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
         InputImage ocrImg = InputImage.fromBitmap(bmp, 0);
         Task<Text> ocrTask = tRecognizer.process(ocrImg)
@@ -174,40 +188,64 @@ public class ScrCapForeground extends Service {
                     //Log.d("SCANNED_TEXT","SUCCESS, text=" + visionText.getText());
                     for (Text.TextBlock block : visionText.getTextBlocks()) {
                         String blockText = block.getText();
-                        Log.d("SCANNED_TEXT",blockText);
+                        //Log.d("SCANNED_TEXT",blockText);
 
-                        if(blockText.toLowerCase(Locale.ROOT).contains("1/2")){
+                        final String[] lapCounts = {"1/2","2/2","1/3","2/3","3/3","1/5","2/5","3/5","4/5","5/5"};
+
+                        final int sim_finish = similarityIndex("finish!",blockText.toLowerCase(Locale.ROOT));
+                        final int sim_start = similarityIndex("go!",blockText.toLowerCase(Locale.ROOT));
+
+                        //Log.d("SCANNED_TEXT",blockText + " IDX " + sim_start);
+
+                        /*
+                        if(sim_start<2){
+                            Log.d("SCANNED_TEXT","FOUND: " + blockText + " IDX:" + sim_start);
                             lapCount = "1_2";
                             setMusic(currentCourse+"("+lapCount+")");
                         }
-                        else if(blockText.toLowerCase(Locale.ROOT).contains("2/2")){
+                        else */if(blockText.toLowerCase(Locale.ROOT).contains("1/2")){
+                            lapCount = "1_2";
+                            setMusic(currentCourse+"("+lapCount+")");
+                        }
+                        else if(blockText.toLowerCase(Locale.ROOT).contains("2/2") && !finished){
                             lapCount = "2_2";
                             setMusic(currentCourse+"("+lapCount+")");
+                            isFinalLap = true;
                         }
-                        else if(blockText.toLowerCase(Locale.ROOT).contains("3/3")){
+                        else if(blockText.toLowerCase(Locale.ROOT).contains("3/3") && !finished){
                             lapCount = "3_3";
                             setMusic(currentCourse+"("+lapCount+")");
+                            isFinalLap = true;
                         }
-                        else if(blockText.toLowerCase(Locale.ROOT).contains("5/5")){
+                        else if(blockText.toLowerCase(Locale.ROOT).contains("5/5") && !finished){
                             lapCount = "5_5";
                             setMusic(currentCourse+"("+lapCount+")");
-                        }/*
-                        else if(isThatFinish(blockText.toLowerCase(Locale.ROOT))){
-                            //Log.d("SCANNED_TEXT","FOUND: " + blockText);
-                            stopMusic();
-                        }*/
-                        else if(blockText.toLowerCase(Locale.ROOT).contains(playerName)){
-                            Log.d("PlayerName","Player's name detected: " + blockText);
+                            isFinalLap = true;
+                        }
+                        else if(sim_finish<4){
+                            Log.d("SCANNED_TEXT","FOUND END: " + blockText + " IDX:" + sim_finish);
+                            //stopMusic();
+                        }/**/
+                        else if(isFinalLap
+                                && (Pattern.compile(".?+(st|nd|rd|th) place!").matcher(blockText.toLowerCase(Locale.ROOT)).find()
+                                    || blockText.toLowerCase(Locale.ROOT).contains(playerName)
+                                )
+                        ){
+                            //Log.d("PlayerName","Player's name detected: " + blockText);
                             lapCount = "";
                             stopMusic();
                             battleMusicTrigger = false;
+                            isFinalLap = false;
+                            finished = true;
                         }
+                        //else if(blockText.toLowerCase(Locale.ROOT).contains("place!"));
                         else if(blockText.toLowerCase(Locale.ROOT).contains("pop your opponents")) {
                             Log.d("MUSIC_FILE","Stage 1");
                             battleMusicTrigger = true;
                         }
                         else if(blockText.toLowerCase(Locale.ROOT).contains("steer") && !mPlayer.isPlaying()){
                             File musicFileCheck = new File(getExternalFilesDir(null) + "/Custom Music/" + currentCourse + ".mp3");
+                            finished = false;
                             if(musicFileCheck.exists() && !musicFileCheck.isDirectory() && battleMusicTrigger){
                                 setMusic(currentCourse);
                             }
@@ -220,7 +258,7 @@ public class ScrCapForeground extends Service {
                             //Log.d("SCANNED_TEXT","In list=" + courseListLoc);
                             if(courseListLoc!=-1){
                                 currentCourse = musicFilesList[courseListLoc];
-                                Log.d("SCANNED_TEXT","New course set: " + currentCourse);
+                                //Log.d("SCANNED_TEXT","New course set: " + currentCourse);
                                 battleMusicTrigger = false;
                             }
                         }
@@ -282,29 +320,55 @@ public class ScrCapForeground extends Service {
         return -1;
     }
 
-    private boolean isThatFinish(String s){
-        if(s.length()>9 || s.length()<4) return false;
-        int similarityIdx = 0;
-        int finishStrIdx = 0;
-        final String finish = "finish";
-        for(int i=0;i<s.length();i++){
-            //similarityIdx += s.charAt(i)==finish.charAt(finishStrIdx)?1:0;
-            if(finish.contains(String.valueOf(s.charAt(i))) && finishStrIdx==0){
-                finishStrIdx = finish.indexOf(s.charAt(i));
-            }
-            else{
-                if(s.charAt(i)==finish.charAt(finishStrIdx)){
-                    similarityIdx++;
-                    finishStrIdx++;
+    public int similarityIndex(String s1, String s2) { // Levenshtein Distance
+        int m = s1.length();
+        int n = s2.length();
+
+        // Create a matrix to store the distances between all substrings
+        int[][] dp = new int[m + 1][n + 1];
+
+        // Initialize the first row and column of the matrix
+        for(int i = 0; i <= m; i++){
+            dp[i][0] = i;
+        }
+        for(int j = 0; j <= n; j++){
+            dp[0][j] = j;
+        }
+
+        // Fill the remaining cells of the matrix
+        for(int i = 1; i <= m; i++){
+            for(int j = 1; j <= n; j++){
+                if(s1.charAt(i - 1) == s2.charAt(j - 1)){
+                    dp[i][j] = dp[i - 1][j - 1];
+                }
+                else{
+                    dp[i][j] = 1 + Math.min(dp[i - 1][j], Math.min(dp[i][j - 1], dp[i - 1][j - 1]));
                 }
             }
         }
-        return similarityIdx>=4;
+
+        // Return the distance between the two strings
+        return dp[m][n];
     }
 
     private String getSharedPreference(String fileName,String key){
         SharedPreferences spGet = getSharedPreferences(fileName, Context.MODE_PRIVATE);
         return spGet.getString(key,"");
+    }
+
+    private void addBroadcastreceiver(){
+        stopRec_BC = new BroadcastReceiver(){
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                checkTitleLoop.interrupt();
+                try {
+                    checkTitleLoop.join();
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        };
+        registerReceiver(stopRec_BC,new IntentFilter("stopRec"));
     }
 
 }
