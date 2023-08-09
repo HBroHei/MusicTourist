@@ -55,41 +55,28 @@ public class ScrCapForeground extends Service {
     private String prevMusicName;
 
     private String playerName = "hammerbrohei";
+    private boolean isPlayerNameShown = false;
 
     private MediaPlayer mPlayer;
     private int startTime;
     private int loopTime;
     private boolean battleMusicTrigger = false;
+    private byte frameCounter = 0;
     private BroadcastReceiver stopRec_BC;
 
-    public ScrCapForeground() {
-    }
+
+    private short threadSleepTime = 1500;
+    public ScrCapForeground() {}
 
     @Override
-    public IBinder onBind(Intent intent) {
-        throw new UnsupportedOperationException("Not yet implemented");
-    }
+    public IBinder onBind(Intent intent) {throw new UnsupportedOperationException("Unsupported Binding");}
 
     @Override
-    public void onCreate() {
-        /*
-        scrCap = new ScreenCap(
-                this,
-                ScrCapForeground.class,
-                Integer.parseInt(getSharedPreference("MTour_device_res", "density")),
-                Integer.parseInt(getSharedPreference("MTour_device_res","width")),
-                Integer.parseInt(getSharedPreference("MTour_device_res","height"))
-        );
-
-        scrCap.prepareWithoutService();
-
-        //startActivityForResult(scrCap.getmProjectionManager(),1);
-/**/
-        super.onCreate();
-    }
+    public void onCreate() {super.onCreate();}
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        // Gets why this service is being called
         try {
              Log.d("CMD_FLAG", String.valueOf(intent.getIntExtra("flag", -1)));
         }
@@ -101,6 +88,7 @@ public class ScrCapForeground extends Service {
         if (intent.getIntExtra("flag", -1) == -1){
             ScreenCap.createForegroundNoti(this,228);
         }
+        // Stop the entire app
         else if (intent.getIntExtra("flag", -1) == 1) {
             //Stop Service
             Log.d("PROCESS_APP","Stopping");
@@ -111,7 +99,6 @@ public class ScrCapForeground extends Service {
         }
         //Run the OCR process
         else if (intent.getIntExtra("flag", -1) == 2) {
-            //Log.d("PROCESS_APP","Looping");
             final int width = intent.getIntExtra("scrCap_width",-1);
             final int height = intent.getIntExtra("scrCap_height",-1);
             final Surface surface = intent.getParcelableExtra("scrCap_surface");
@@ -127,6 +114,7 @@ public class ScrCapForeground extends Service {
 
             mPlayer = new MediaPlayer();
 
+            //Replace all .mp3 with nothing for the list to use
             try {
                 for (int i = 0; i < Objects.requireNonNull(musicFilesList).length; i++) {
                     musicFilesList[i] = musicFilesList[i].replaceAll(".mp3", "");
@@ -144,7 +132,7 @@ public class ScrCapForeground extends Service {
                         Log.d("PROCESS_APP", "Looping");
                         if (surface == null) {
                             try {
-                                Thread.sleep(500);
+                                Thread.sleep(threadSleepTime);
                                 Log.w("Surface Empty", "Surface is empty!");
                             } catch (InterruptedException e) {
                                 e.printStackTrace();
@@ -157,15 +145,15 @@ public class ScrCapForeground extends Service {
                             }, new Handler(Looper.getMainLooper()));
                         }
 
-                        //Custom Loop
+                        // Custom Loop for the music
                         if (mPlayer.isPlaying()) {
                             if (mPlayer.getCurrentPosition() >= loopTime) {
                                 mPlayer.seekTo(startTime);
-                                Log.d("MUSIC_FILE", "Music exceeded " + loopTime + ", looping music...");
+                                //Log.d("MUSIC_FILE", "Music exceeded " + loopTime + ", looping music...");
                             }
                         }
                         try {
-                            Thread.sleep(500);
+                            Thread.sleep(threadSleepTime);
                         } catch (InterruptedException e) {
                             Thread.currentThread().interrupt();
                         }
@@ -186,6 +174,12 @@ public class ScrCapForeground extends Service {
         Task<Text> ocrTask = tRecognizer.process(ocrImg)
                 .addOnSuccessListener(visionText -> {
                     //Log.d("SCANNED_TEXT","SUCCESS, text=" + visionText.getText());
+                    // Resets isPlayerNameShown on every other frame
+                    if(++frameCounter==2){
+                        frameCounter = 0;
+                        isPlayerNameShown = false;
+                    }
+                    // iterate through every text block (group)
                     for (Text.TextBlock block : visionText.getTextBlocks()) {
                         String blockText = block.getText();
                         //Log.d("SCANNED_TEXT",blockText);
@@ -194,16 +188,16 @@ public class ScrCapForeground extends Service {
 
                         final int sim_finish = similarityIndex("finish!",blockText.toLowerCase(Locale.ROOT));
                         final int sim_start = similarityIndex("go!",blockText.toLowerCase(Locale.ROOT));
-
-                        //Log.d("SCANNED_TEXT",blockText + " IDX " + sim_start);
-
                         /*
+                        // Check for text "START". Currently not checkable
                         if(sim_start<2){
                             Log.d("SCANNED_TEXT","FOUND: " + blockText + " IDX:" + sim_start);
                             lapCount = "1_2";
                             setMusic(currentCourse+"("+lapCount+")");
                         }
-                        else */if(blockText.toLowerCase(Locale.ROOT).contains("1/2")){
+                        else */
+                        // If: lap count check
+                        if(blockText.toLowerCase(Locale.ROOT).contains("1/2")){
                             lapCount = "1_2";
                             setMusic(currentCourse+"("+lapCount+")");
                         }
@@ -222,15 +216,20 @@ public class ScrCapForeground extends Service {
                             setMusic(currentCourse+"("+lapCount+")");
                             isFinalLap = true;
                         }
+                        // Check "FINISH!" word. Currently not checkable
+                        /*
                         else if(sim_finish<4){
                             Log.d("SCANNED_TEXT","FOUND END: " + blockText + " IDX:" + sim_finish);
                             //stopMusic();
                         }/**/
-                        else if(isFinalLap
-                                && (Pattern.compile(".?+(st|nd|rd|th) place!").matcher(blockText.toLowerCase(Locale.ROOT)).find()
+                        // Check for race ended with
+                        // 1. isFinalLap = true, and
+                        // 2a. 1st/2nd/3rd/_th place! text shows up, or
+                        // 2b. Player name is displayed (at the result screen)
+                        else if(isFinalLap && (
+                                    Pattern.compile(".?+(st|nd|rd|th) place!").matcher(blockText.toLowerCase(Locale.ROOT)).find()
                                     || blockText.toLowerCase(Locale.ROOT).contains(playerName)
-                                )
-                        ){
+                        )){
                             //Log.d("PlayerName","Player's name detected: " + blockText);
                             lapCount = "";
                             stopMusic();
@@ -238,11 +237,13 @@ public class ScrCapForeground extends Service {
                             isFinalLap = false;
                             finished = true;
                         }
-                        //else if(blockText.toLowerCase(Locale.ROOT).contains("place!"));
+                        // if: check for battle mode starting
                         else if(blockText.toLowerCase(Locale.ROOT).contains("pop your opponents")) {
                             Log.d("MUSIC_FILE","Stage 1");
                             battleMusicTrigger = true;
+                            isPlayerNameShown = false;
                         }
+                        // If: check if race started, and the music is not playing
                         else if(blockText.toLowerCase(Locale.ROOT).contains("steer") && !mPlayer.isPlaying()){
                             File musicFileCheck = new File(getExternalFilesDir(null) + "/Custom Music/" + currentCourse + ".mp3");
                             finished = false;
@@ -253,13 +254,22 @@ public class ScrCapForeground extends Service {
                                 setMusic(currentCourse+"("+lapCount+")");
                             }
                         }
+                        // Check for course name is on screen, then set the current course to the one on-screen
                         else{
-                            int courseListLoc = isCourseInString(blockText.toLowerCase(Locale.ROOT));
-                            //Log.d("SCANNED_TEXT","In list=" + courseListLoc);
-                            if(courseListLoc!=-1){
-                                currentCourse = musicFilesList[courseListLoc];
-                                //Log.d("SCANNED_TEXT","New course set: " + currentCourse);
-                                battleMusicTrigger = false;
+                            if(isPlayerNameShown){
+                                int courseListLoc = isCourseInString(blockText.toLowerCase(Locale.ROOT));
+                                //Log.d("SCANNED_TEXT",blockText.toLowerCase(Locale.ROOT) + " In list=" + courseListLoc);
+                                if (courseListLoc != -1) {
+                                    currentCourse = musicFilesList[courseListLoc];
+                                    //Log.d("SCANNED_TEXT","New course set: " + currentCourse);
+                                    battleMusicTrigger = false;
+                                    // Increase the frequency for checking
+                                    threadSleepTime = 750;
+                                }
+
+                            }
+                            else if((!isFinalLap) && blockText.toLowerCase(Locale.ROOT).contains(playerName)) {
+                                isPlayerNameShown = true;
                             }
                         }
                     }
